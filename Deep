@@ -1,0 +1,74 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.feature_extraction.text import Tokenizer
+from sklearn.metrics import accuracy_score
+from keras.preprocessing.sequence import pad_sequences
+from keras.models import Sequential
+from keras.layers import Embedding, LSTM, Dense, Dropout
+from hyperopt import fmin, tpe, hp
+
+# Load and preprocess data (replace with your data loading and preprocessing steps)
+data = pd.read_csv('your_dataset.csv')
+X = data['text']
+y = data['label']
+
+# Encode labels
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)
+
+# Tokenize text data
+max_words = 5000
+tokenizer = Tokenizer(num_words=max_words)
+tokenizer.fit_on_texts(X)
+X_sequences = tokenizer.texts_to_sequences(X)
+X_padded = pad_sequences(X_sequences)
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X_padded, y_encoded, test_size=0.2, random_state=42)
+
+# Define LSTM model
+def create_lstm_model(params):
+    model = Sequential()
+    model.add(Embedding(max_words, params['embedding_dim'], input_length=X_padded.shape[1]))
+    model.add(LSTM(params['lstm_units']))
+    model.add(Dropout(params['dropout']))
+    model.add(Dense(len(np.unique(y_encoded)), activation=params['activation']))
+
+    model.compile(optimizer=params['optimizer'], loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+# Define the search space for hyperparameters
+space = {
+    'embedding_dim': hp.choice('embedding_dim', [32, 64, 128]),
+    'lstm_units': hp.choice('lstm_units', [64, 128, 256]),
+    'dropout': hp.uniform('dropout', 0.2, 0.5),
+    'activation': hp.choice('activation', ['relu', 'tanh', 'sigmoid']),
+    'optimizer': hp.choice('optimizer', ['adam', 'rmsprop'])
+}
+
+# Hyperparameter optimization using Hyperopt
+def objective(params):
+    model = create_lstm_model(params)
+    model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=0)
+    y_pred = model.predict(X_test)
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    accuracy = accuracy_score(y_test, y_pred_classes)
+    return -accuracy  # Hyperopt minimizes, so we use negative accuracy
+
+best = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=10)
+
+# Print the best hyperparameters found
+best_embedding_dim = [32, 64, 128][best['embedding_dim']]
+best_lstm_units = [64, 128, 256][best['lstm_units']]
+best_dropout = best['dropout']
+best_activation = ['relu', 'tanh', 'sigmoid'][best['activation']]
+best_optimizer = ['adam', 'rmsprop'][best['optimizer']]
+
+print("Best Hyperparameters:")
+print("Embedding Dimension:", best_embedding_dim)
+print("LSTM Units:", best_lstm_units)
+print("Dropout:", best_dropout)
+print("Activation:", best_activation)
+print("Optimizer:", best_optimizer)
